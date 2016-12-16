@@ -9,8 +9,8 @@ target_cols = ['ind_cco_fin_ult1','ind_cder_fin_ult1','ind_cno_fin_ult1','ind_ct
                'ind_nom_pens_ult1','ind_recibo_ult1']
 
 # load data
-trainX = np.load("trainX.dat")
-trainY = np.load("trainY.dat")
+trainX = np.load("trainX_all.dat")
+trainY = np.load("trainY_all.dat")
 testX  = np.load("testX.npy")
 print("train X is: ", trainX.shape)
 print("train Y is: ", trainY.shape)
@@ -38,7 +38,7 @@ model = xgb.train(params, dtrain, num_rounds)
 del trainX, trainY
 
 preds = model.predict(dtest, ntree_limit=220)
-np.save("preds_june", preds)
+np.save("preds_all", preds)
 del testX
 
 target_cols = np.array(target_cols)
@@ -48,5 +48,5 @@ test_ids = np.array(np.load("test_ids.npy"))
 
 final_preds = [" ".join(list(target_cols[pred])) for pred in preds]
 out_df = pd.DataFrame({'ncodpers':test_ids, 'added_products':final_preds})
-out_df.to_csv('submission.csv', index=False)
+out_df.to_csv('submission_all.csv', index=False)
 
