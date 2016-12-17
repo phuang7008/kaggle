@@ -73,3 +73,12 @@ for id in range(len(train_common_customers)):
         
 print("2015-05 total remaining: ", len(changed_status_55))
 np.save("changed_ids_new2", changed_status_55)
+
+train2015_05_28_changed = train2015_05_28[train2015_05_28.ncodpers.isin(changed_status_55)]
+train2015_06_28_changed = train2015_06_28[train2015_06_28.ncodpers.isin(changed_status_55)]
+print(train2015_05_28_changed.shape)
+print(train2015_06_28_changed.shape)
+
+# save them
+train2015_05_28_changed.to_csv("train2015_05_28_changed.csv", index=False)
+train2015_06_28_changed.to_csv("train2015_06_28_changed.csv", index=False)
