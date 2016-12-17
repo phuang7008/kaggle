@@ -83,3 +83,15 @@ for idx, row in train56.iterrows():
             
 print(len(trainY))
 print(len(trainX))
+
+from collections import Counter
+print(Counter(trainY))
+
+trainX = np.array(trainX)
+trainY = np.array(trainY)
+print(trainY.shape)
+print(trainX.shape)
+print(trainX[0])
+
+trainY.dump("trainY.dat")
+trainX.dump("trainX.dat")
