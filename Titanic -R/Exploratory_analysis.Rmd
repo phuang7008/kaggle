@@ -1,1 +1,161 @@
+---
+title: "Using R notebook for Titanic Data Analysis"
+output: html_notebook
+---
 
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+```{r}
+library(readr)
+library(data.table)
+library(ggplot2)
+library(ggthemes)
+library(scales)
+library(dplyr)
+
+# change the directoroy to point to the Titanic directory
+setwd("G:/Tutorial/Kaggle Competitions/Titanic")
+
+# now read in the dataset
+# the readr library
+train <- read_csv("train.csv")
+test  <- read_csv("test.csv")
+
+# the data.table way
+train2 <- fread("train.csv")
+test2  <- fread("test.csv")
+
+# now combine both dataset
+all_data <- bind_rows(train, test)
+
+# check the data structure
+str(all_data)
+```
+From the data, we see that no factor variable is created as read_csv() default to not produce any factors
+
+the following are taking mostly from: https://www.kaggle.com/mrisdal/titanic/exploring-survival-on-the-titanic
+
+Feature Engineering
+
+The name field contains title for each person. Let's get them out and add new variable named Title
+
+```{r}
+all_data$Title <- gsub('(.*, )|(\\..*)', '', all_data$Name)
+
+# show the count information by sex
+table(all_data$Sex, all_data$Title)
+
+# some titles are rare, replace them with 'rare_title'
+rare_title <- c('Dona', 'Lady', 'the Countess','Capt', 'Col', 'Don', 
+                'Dr', 'Major', 'Rev', 'Sir', 'Jonkheer')
+
+# Also reassign mlle, ms, and mme accordingly
+all_data$Title[all_data$Title == 'Mlle'] <- 'Miss'
+all_data$Title[all_data$Title == 'Ms']   <- 'Miss'
+all_data$Title[all_data$Title == 'Mme']  <- 'Mrs'
+all_data$Title[all_data$Title %in% rare_title] <- 'Rare'
+
+# output the count information again
+table(all_data$Sex, all_data$Title)
+```
+2.2 Do families sink or swim together?
+Now that we've taken care of splitting passenger name into some new variables, we can take it a step further and make some new family variables. First we're going to make a family size variable based on number of siblings/spouse(s) (maybe someone has more than one spouse?) and number of children/parents.
+```{r}
+# finally, let's try to get the surname out
+all_data$Surname <- sapply(all_data$Name, 
+                           function(x) strsplit(x, split='[,.]')[[1]][1])
+cat(paste('We have <b>', 
+          nlevels(factor(all_data$Surname)), '</b> unique surnames.'))
+
+# Create a family size variable including the passenger themselves
+all_data$Fsize <- all_data$SibSp + all_data$Parch + 1
+
+# Create a Family variable
+all_data$Family <- paste(all_data$Surname, all_data$Fsize, sep='_')
+
+# What does our family size variable look like? To help us understand how it may relate to survival, let's plot it among the training data, as only training dataset contains the survival information
+g <- ggplot(all_data[1:891,], aes(Fsize, fill=factor(Survived)))
+g + geom_bar(stat='count', position='dodge') + scale_x_continuous(breaks=c(1:11)) + labs(x='Family Size') + theme_few()
+```
+We can see that there's a survival penalty to singletons and those with family sizes above 4. We can collapse this variable into three levels which will be helpful since there are comparatively fewer large families. Let's create a discretized family size variable.
+```{r}
+all_data$FsizeD[all_data$Fsize == 1] <- 'singleton'
+all_data$FsizeD[all_data$Fsize <= 4 & all_data$Fsize >1] <- 'small'
+all_data$FsizeD[all_data$Fsize > 4] <- 'large'
+
+# Show family size by survival using a mosaic plot
+mosaicplot(table(all_data$FsizeD, all_data$Survived), main='Family Size by Survival', shade=TRUE)
+
+
+```
+The mosaic plot shows that we preserve our rule that there's a survival penalty among singletons and large families, but a benefit for passengers in small families. I want to do something further with our age variable, but 263 rows have missing age values, so we will have to wait until after we address missingness.
+
+2.3 Treat a few more variables .
+What's left? There's probably some potentially useful information in the passenger cabin variable including about their deck. Let's take a look.
+
+```{r}
+# This variable appears to have a lot of missing values
+all_data$Cabin[1:28]
+
+# The first character is the deck. For example:
+strsplit(all_data$Cabin[2], '')[[1]]
+strsplit(all_data$Cabin[2], NULL)[[1]]
+
+# Create a Deck variable. Get passenger deck A - F:
+all_data$Deck <- factor(sapply(all_data$Cabin, function(x) strsplit(x, split='')[[1]][1]))
+```
+There's more that likely could be done here including looking into cabins with multiple rooms listed (e.g., row 28: "C23 C25 C27"), but given the sparseness of the column we'll stop here.
+
+3 Missingness
+Now we're ready to start exploring missing data and rectifying it through imputation. There are a number of different ways we could go about doing this. Given the small size of the dataset, we probably should not opt for deleting either entire observations (rows) or variables (columns) containing missing values. We're left with the option of either replacing missing values with a sensible values given the distribution of the data, e.g., the mean, median or mode. Finally, we could go with prediction. We'll use both of the two latter methods and I'll rely on some data visualization to guide our decisions.
+```{r}
+# 3.1 Sensible value imputation
+filter(train, is.na(train$Embarked))
+
+# Passengers 62 and 830 are missing Embarkment
+all_data[c(62, 830), 'Embarked']
+#filter(train, train$PassengerId == 62)
+
+# let's try to find out the Pclass and fare they have paid
+print(train[c(62,830), c("Fare", "Pclass")])
+
+# Therefore, is it possible for us to find out where they embarked
+# let's graph it, but first we need to remove these two entries
+df1 <- all_data %>% filter(!is.na(Embarked))
+str(df1)
+
+# visualization: Pclass vs 'median' Fare vs Embarkment
+gf <- ggplot(df1, aes(x=Embarked, y=Fare, fill=factor(Pclass)))
+gf <- gf + geom_boxplot()
+gf <- gf + geom_hline(aes(yintercept=80), colour='red', linetype='dashed', lwd=2)
+gf + scale_y_continuous(labels=dollar_format()) + theme_few()
+```
+Voilà! The median fare for a first class passenger departing from Charbourg ('C') coincides nicely with the $80 paid by our embarkment-deficient passengers. I think we can safely replace the NA values with 'C'.
+```{r}
+all_data$Embarked[is.na(all_data$Embarked)] <- 'C'
+all_data[c(62, 830), 'Embarked']
+```
+We're close to fixing the handful of NA values here and there. Passenger on row 1044 has an NA Fare value.
+```{r}
+all_data[c(1044), c('Fare', 'Pclass', 'Embarked')]
+```
+Again, we can use graph to visualize the median fare paid by those passengers who embarked at 'S' port and with Pclass in 3
+```{r}
+ga <- ggplot(all_data[all_data$Pclass == 3 & all_data$Embarked == 'S',], aes(x=Fare))
+ga <- ga + geom_density(fill='#99d6ff', alpha=0.4)
+ga <- ga + geom_vline(aes(xintercept = median(Fare, na.rm=T)), colour='red', linetype='dashed', lwd=1)
+ga+theme_few()
+```
+From this visualization, it seems quite reasonable to replace the NA Fare value with median for their class and embarkment which is $8.05.
+```{r}
+all_data[c(1044), 'Fare'] <- median(all_data[all_data$Pclass==3 & all_data$Embarked=='S',]$Fare, na.rm=T)
+all_data[c(1044), 'Fare']
+```
+3.2 Predictive imputation
+Finally, as we noted earlier, there are quite a few missing Age values in our data. We are going to get a bit more fancy in imputing missing age values. Why? Because we can. We will create a model predicting ages based on other variables.
