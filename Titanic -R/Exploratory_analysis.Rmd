@@ -145,7 +145,7 @@ We're close to fixing the handful of NA values here and there. Passenger on row 
 ```{r}
 all_data[c(1044), c('Fare', 'Pclass', 'Embarked')]
 ```
-Again, we can use graph to visualize the median fare paid by those passengers who embarked at 'S' port and with Pclass in 3
+Again, we can use graph to visualize the median fare paid by those passengers who embarked at 'S' port and with Pclass in 3; Here try not to use all_data$Fare as it includes everything. However, here we only interested in a subset of that data!
 ```{r}
 ga <- ggplot(all_data[all_data$Pclass == 3 & all_data$Embarked == 'S',], aes(x=Fare))
 ga <- ga + geom_density(fill='#99d6ff', alpha=0.4)
@@ -159,3 +159,84 @@ all_data[c(1044), 'Fare']
 ```
 3.2 Predictive imputation
 Finally, as we noted earlier, there are quite a few missing Age values in our data. We are going to get a bit more fancy in imputing missing age values. Why? Because we can. We will create a model predicting ages based on other variables.
+```{r}
+# how many 'Age' value missing?
+sum(is.na(all_data$Age))
+```
+We could definitely use 'rpart' (recursive partitioning for regression) to predict missing ages, but we are going to use the 'mice' package for this task just for something different.  
+```{r}
+# first factorize the factor variables (b/c the read_csv default to no factorization) and then perform mice imputation.
+factor_variables <- c('Pclass', 'PassengerId', 'Sex', 
+                      'Embarked', 'Title', 'Surname', 'Family', 'FsizeD')
+
+all_data[factor_variables] <- 
+  lapply(all_data[factor_variables], function(x) as.factor(x))
+str(all_data)
+```
+Perform imputation!
+```{r}
+library(mice)
+
+# set random seed
+set.seed(151)
+
+# perform 'mice' impuration, exclude some less-than-useful variables
+excluded <- c('PassengerId', 'Name', 'Ticket', 'Cabin', 'Family',  'Surname', 'Survived')
+mice_mod <- mice(all_data[, !names(all_data) %in% excluded], method='rf')
+```
+Save the results and  compare the results we get with the original distribution of passenger ages to ensure that nothing has gone completely awry.
+```{r}
+# save the imputation results
+mice_output <- complete(mice_mod)
+
+# draw 'Age' distribution before and after
+par(mfrow=c(1,2))
+hist(all_data$Age, freq=F, main="Age: Original Data", col="darkgreen", ylim=c(0,0.04))
+hist(mice_output$Age, freq=F, main="Age: After Impuration", col='lightgreen', ylim=c(0, 0.04))
+```
+Things look good, so let's replace our age vector in the original data with the output from the mice model.
+```{r}
+all_data$Age <- mice_output$Age
+
+# check to see if there is still any missing Age values left
+sum(is.na(all_data$Age))
+```
+3.3 Feature Engineering: Round 2
+Now that we know everyone's age, we can create a couple of new age-dependent variables: Child and Mother. A child will simply be someone under 18 years of age and a mother is a passenger who is 1) female, 2) is over 18, 3) has more than 0 children (no kidding!), and 4) does not have the title 'Miss'.
+```{r}
+# is there any relationship between Sex, Age and Survival? Let's graph the training data first
+gs <- ggplot(all_data[1:891,], aes(Age, fill=factor(Survived)))
+gs + geom_histogram() + facet_grid(.~Sex) + theme_few()
+```
+```{r}
+warnings()
+# create a column called 'Child' to indicate if the person is child or adult
+all_data$Child[all_data$Age < 18]  <- 'Child'
+all_data$Child[all_data$Age >= 18] <- 'Adult'
+
+# show count against Survival
+table(all_data$Child, all_data$Survived)
+```
+Looks like being a child doesn't hurt, but it's not going to necessarily save you either! We will finish off our feature engineering by creating the Mother variable. Maybe we can hope that mothers are more likely to have survived on the Titanic.
+```{r}
+# add mother variable
+all_data$Mother <- 'Not Mother'
+
+all_data$Mother[all_data$Child == 'Adult' & all_data$Sex == 'female' & all_data$Parch > 0 & all_data$Title != 'Miss'] <- "Mother"
+
+table(all_data$Mother, all_data$Survived)
+```
+```{r}
+# Finish by factorizing our two new factor variables
+all_data$Child <- factor(all_data$Child)
+all_data$Mother <- factor(all_data$Mother)
+```
+
+All of the variables we care about should be taken care of and there should be no missing data. I'm going to double check just to be sure:
+```{r}
+md.pattern(all_data)
+
+# let save the results for future use
+write.csv(all_data, file='final_train.csv', row.names=FALSE)
+```
+
